@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Comanda do Domingo</title>
+<style>
+:root{--bg:#faf7f2;--fg:#2a2118;--mut:#7a6d5f;--card:#fff;--bd:#e6ddd0;--acc:#c2410c;--accfg:#fff;--n:#b45309;--p:#1d4ed8;--r:#15803d;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1612;--fg:#f3ebe0;--mut:#a89a8a;--card:#27201a;--bd:#3a3128;--acc:#ea6a2a;--accfg:#1b1612;--n:#f0a63a;--p:#7aa2ff;--r:#4ade80}}
+:root[data-theme="dark"]{--bg:#1b1612;--fg:#f3ebe0;--mut:#a89a8a;--card:#27201a;--bd:#3a3128;--acc:#ea6a2a;--accfg:#1b1612;--n:#f0a63a;--p:#7aa2ff;--r:#4ade80}
+html{scroll-padding-top:env(safe-area-inset-top,0px);height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100%}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);background:var(--card);z-index:10}
+nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:9;display:flex;background:var(--card);border-bottom:1px solid var(--bd)}
+nav button{flex:1;padding:14px 4px;border:0;background:none;color:var(--mut);font:inherit;font-size:14px;font-weight:600;border-bottom:3px solid transparent}
+nav button.on{color:var(--acc);border-color:var(--acc)}
+main{max-width:640px;margin:0 auto;padding:14px}
+h2{font-size:18px;margin:4px 0 12px}
+input,textarea{width:100%;box-sizing:border-box;padding:12px;border:1px solid var(--bd);border-radius:10px;background:var(--card);color:var(--fg);font:inherit;margin-bottom:10px}
+.row,.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.card{display:block}
+.mut{color:var(--mut);font-size:14px}
+.qty{display:flex;align-items:center;gap:12px}
+.qty button{width:40px;height:40px;border-radius:50%;border:1px solid var(--bd);background:var(--bg);color:var(--fg);font-size:22px}
+.qty span{min-width:20px;text-align:center;font-weight:700}
+.btn{width:100%;padding:14px;border:0;border-radius:12px;background:var(--acc);color:var(--accfg);font:inherit;font-weight:700;font-size:17px;margin-top:6px}
+.btn.sec{background:var(--bg);color:var(--fg);border:1px solid var(--bd);font-size:14px;padding:10px;width:auto}
+.tot{display:flex;justify-content:space-between;font-size:18px;font-weight:700;margin:12px 0 4px}
+.tag{display:inline-block;padding:2px 10px;border-radius:99px;font-size:13px;font-weight:700;border:1px solid currentColor}
+.s0{color:var(--n)}.s1{color:var(--p)}.s2{color:var(--r)}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.obs{background:var(--bg);border-radius:8px;padding:6px 10px;margin:6px 0;font-size:14px}
+.acts{display:flex;gap:8px;margin-top:8px}.acts .btn{margin:0;font-size:15px;padding:12px}
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:10px 18px;border-radius:99px;font-weight:600;opacity:0;transition:opacity .2s;pointer-events:none}
+#toast.show{opacity:1}
+</style></head><body>
+<nav><button data-t="pedido">Pedido</button><button data-t="cozinha">Cozinha</button><button data-t="historico">Histórico</button><button data-t="cardapio">Cardápio</button><button data-t="resumo">Resumo</button></nav>
+<main>
+<section id="pedido"><h2>Novo pedido</h2>
+<input id="who" placeholder="Mesa ou nome do cliente">
+<div id="items"></div>
+<textarea id="obs" rows="2" placeholder="Observações (ex.: sem cebola)"></textarea>
+<div class="tot"><span>Total</span><span id="tot"></span></div>
+<button class="btn" id="send">Enviar pedido</button></section>
+<section id="cozinha" hidden></section>
+<section id="historico" hidden></section>
+<section id="cardapio" hidden></section>
+<section id="resumo" hidden></section>
+</main>
+<div id="toast"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+const K='comanda-domingo-v1';
+let S={menu:[],orders:[]};
+
+const run=(fn,...a)=>window.fb[fn](...a);
+async function sync(){if(tab!=='cardapio')render()}
+window.setState=(m,o)=>{S={menu:m,orders:o};if(tab!=='cardapio')render()};
+addEventListener('offline',()=>toast('Sem internet'));addEventListener('online',()=>toast('Internet voltou'));
+let cart={},tab='pedido',armed=null;
+const $=id=>document.getElementById(id);
+const brl=n=>'R$ '+n.toFixed(2).replace('.',',');
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ST=['Novo','Em preparo','Pronto','Entregue'],NX=['Iniciar preparo','Marcar pronto','Marcar entregue'];
+function toast(t){const e=$('toast');e.textContent=t;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),1800)}
+function render(){
+ document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===tab));
+ ['pedido','cozinha','historico','cardapio','resumo'].forEach(t=>$(t).hidden=t!==tab);
+ ({pedido:rPedido,cozinha:rCozinha,historico:rHistorico,cardapio:rCardapio,resumo:rResumo})[tab]();
+}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;armed=null;render()});
+function rPedido(){
+ $('items').innerHTML=S.menu.map(m=>`<div class="row"><div><b>${esc(m.n)}</b><div class="mut">${brl(m.p)}</div></div><div class="qty"><button onclick="q(${m.id},-1)">−</button><span>${cart[m.id]||0}</span><button onclick="q(${m.id},1)">+</button></div></div>`).join('')||'<p class="mut">Cardápio vazio. Adicione itens na aba Cardápio.</p>';
+ $('tot').textContent=brl(S.menu.reduce((a,m)=>a+(cart[m.id]||0)*m.p,0));
+}
+function q(id,d){cart[id]=Math.max(0,(cart[id]||0)+d);rPedido()}
+$('send').onclick=async()=>{
+ const items=S.menu.filter(m=>cart[m.id]>0).map(m=>({n:m.n,p:m.p,q:cart[m.id]}));
+ if(!items.length){toast('Escolha ao menos um item');return}
+ const b=$('send');b.disabled=true;
+ try{const r=await run('addOrder',{who:$('who').value.trim()||'Sem nome',obs:$('obs').value.trim(),items});cart={};$('who').value='';$('obs').value='';toast('Pedido #'+r.id+' enviado');await sync()}catch(e){toast('Erro ao enviar. Tente de novo')}
+ b.disabled=false;rPedido();
+};
+function rCozinha(){
+ const l=S.orders.filter(o=>o.s<3);
+ $('cozinha').innerHTML='<h2>Cozinha ('+l.length+')</h2>'+(l.map(o=>`<div class="card"><div class="top"><b>#${o.id} · ${esc(o.who)}</b><span class="tag s${o.s}">${ST[o.s]}</span></div><div class="mut">${o.t}</div>${o.items.map(i=>`<div>${i.q}× ${esc(i.n)}</div>`).join('')}${o.obs?`<div class="obs">${esc(o.obs)}</div>`:''}<div class="acts"><button class="btn" onclick="adv(${o.id},${o.s})">${NX[o.s]}</button><button class="btn sec" onclick="del(${o.id})">${armed==='o'+o.id?'Confirmar?':'Excluir'}</button></div></div>`).join('')||'<p class="mut">Nenhum pedido em aberto.</p>');
+}
+async function adv(id,s){try{await run('setStatus',id,s)}catch(e){toast('Erro de conexão')}armed=null;await sync()}
+async function del(id){if(armed!=='o'+id){armed='o'+id;render();return}try{await run('deleteOrder',id)}catch(e){toast('Erro de conexão')}armed=null;await sync()}
+function rCardapio(){
+ $('cardapio').innerHTML='<h2>Cardápio</h2>'+S.menu.map(m=>`<div class="row"><div><b>${esc(m.n)}</b><div class="mut">${brl(m.p)}</div></div><button class="btn sec" onclick="rm(${m.id})">${armed==='m'+m.id?'Confirmar?':'Remover'}</button></div>`).join('')+'<h2 style="margin-top:18px">Adicionar item</h2><input id="nm" placeholder="Nome do item"><input id="pr" inputmode="decimal" placeholder="Preço (ex.: 12,50)"><button class="btn" onclick="add()">Adicionar</button>';
+}
+async function add(){const n=$('nm').value.trim(),p=parseFloat($('pr').value.replace(',','.'));if(!n||isNaN(p)){toast('Informe nome e preço');return}try{await run('addMenuItem',n,p)}catch(e){toast('Erro de conexão')}armed=null;await sync();render()}
+async function rm(id){if(armed!=='m'+id){armed='m'+id;render();return}try{await run('removeMenuItem',id)}catch(e){toast('Erro de conexão')}delete cart[id];armed=null;await sync();render()}
+let hf='saidos';
+function rHistorico(){
+ const l=S.orders.filter(o=>hf==='todos'||o.s===3).slice().reverse();
+ const tv=o=>o.items.reduce((a,i)=>a+i.p*i.q,0);
+ const on=k=>hf===k?'border-color:var(--acc);color:var(--acc)':'';
+ $('historico').innerHTML=`<h2>Histórico (${l.length})</h2><div class="acts" style="margin:0 0 12px"><button class="btn sec" style="${on('saidos')}" onclick="hf='saidos';render()">Saíram</button><button class="btn sec" style="${on('todos')}" onclick="hf='todos';render()">Todos</button></div>`+(l.map(o=>`<div class="card"><div class="top"><b>#${o.id} · ${esc(o.who)}</b><span class="mut">${o.t}</span></div>${o.items.map(i=>`<div class="top" style="margin:0"><span>${i.q}× ${esc(i.n)}</span><span class="mut">${brl(i.p*i.q)}</span></div>`).join('')}${o.obs?`<div class="obs">${esc(o.obs)}</div>`:''}<div class="top" style="margin:8px 0 0"><span class="tag s${o.s}">${ST[o.s]}</span><b>${brl(tv(o))}</b></div></div>`).join('')||'<p class="mut">Nenhum pedido aqui ainda.</p>');
+}
+function rResumo(){
+ const t=S.orders.reduce((a,o)=>a+o.items.reduce((b,i)=>b+i.p*i.q,0),0),c={};
+ S.orders.forEach(o=>o.items.forEach(i=>c[i.n]=(c[i.n]||0)+i.q));
+ const r=Object.entries(c).sort((a,b)=>b[1]-a[1]);
+ $('resumo').innerHTML=`<h2>Resumo do dia</h2><div class="row"><span>Total vendido</span><b>${brl(t)}</b></div><div class="row"><span>Pedidos</span><b>${S.orders.length}</b></div><div class="row"><span>Entregues</span><b>${S.orders.filter(o=>o.s===3).length}</b></div><h2 style="margin-top:18px">Itens mais vendidos</h2>${r.map(x=>`<div class="row"><span>${esc(x[0])}</span><b>${x[1]}</b></div>`).join('')||'<p class="mut">Ainda sem vendas.</p>'}<h2 style="margin-top:18px">Salvar o dia</h2><div class="acts"><button class="btn sec" onclick="dl('pdf')">Salvar PDF</button><button class="btn sec" onclick="dl('html')">Salvar HTML</button></div><button class="btn sec" style="margin-top:14px" onclick="nd()">${armed==='nd'?'Salvou o dia? Toque de novo para apagar':'Apagar pedidos de hoje (testes)'}</button>`;
+}
+const tvo=o=>o.items.reduce((a,i)=>a+i.p*i.q,0);
+function stats(){const c={};S.orders.forEach(o=>o.items.forEach(i=>c[i.n]=(c[i.n]||0)+i.q));return{tot:S.orders.reduce((a,o)=>a+tvo(o),0),top:Object.entries(c).sort((a,b)=>b[1]-a[1])}}
+function stamp(){const d=new Date(),z=n=>String(n).padStart(2,'0');return{br:d.toLocaleDateString('pt-BR'),iso:d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())}}
+async function dl(kind){
+ if(!S.orders.length){toast('Nenhum pedido para salvar');return}
+ const d={save:async({filename,data})=>{const bl=data instanceof Blob?data:new Blob([data],{type:'text/html'});const u=URL.createObjectURL(bl),a=document.createElement('a');a.href=u;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),2000)}};
+ 
+ const st=stamp(),{tot,top}=stats();
+ try{
+  if(kind==='html'){
+   const rows=S.orders.map(o=>`<tr><td>#${o.id}</td><td>${o.t}</td><td>${esc(o.who)}</td><td>${o.items.map(i=>i.q+'× '+esc(i.n)).join('<br>')}${o.obs?'<br><i>'+esc(o.obs)+'</i>':''}</td><td>${ST[o.s]}</td><td style='text-align:right'>${brl(tvo(o))}</td></tr>`).join('');
+   const h=`<!DOCTYPE html><html lang='pt-BR'><head><meta charset='utf-8'><title>Comanda ${st.br}</title><style>body{font:15px system-ui,sans-serif;max-width:800px;margin:24px auto;padding:0 14px;color:#222}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ddd;padding:8px;text-align:left;vertical-align:top}</style></head><body><h1>Resumo do dia ${st.br}</h1><p><b>Total vendido:</b> ${brl(tot)} · <b>Pedidos:</b> ${S.orders.length}</p><h2>Itens vendidos</h2><ul>${top.map(x=>`<li>${esc(x[0])}: ${x[1]}</li>`).join('')}</ul><h2>Pedidos</h2><table><tr><th>Nº</th><th>Hora</th><th>Cliente</th><th>Itens</th><th>Status</th><th>Valor</th></tr>${rows}</table></body></html>`;
+   await d.save({filename:'comanda-'+st.iso+'.html',data:h});
+  }else{
+   const J=window.jspdf&&window.jspdf.jsPDF;if(!J){toast('PDF indisponível');return}
+   const p=new J();let y=18;
+   const ln=(t,sz=11,b=false)=>{p.setFontSize(sz);p.setFont('helvetica',b?'bold':'normal');p.splitTextToSize(t,190).forEach(s=>{if(y>280){p.addPage();y=18}p.text(s,10,y);y+=sz*0.45+1.5})};
+   ln('Resumo do dia '+st.br,18,true);ln('Total vendido: '+brl(tot)+'   Pedidos: '+S.orders.length,12);y+=3;
+   ln('Itens vendidos',14,true);top.forEach(x=>ln(x[0]+': '+x[1]));y+=3;
+   ln('Pedidos',14,true);
+   S.orders.forEach(o=>{ln('#'+o.id+' - '+o.who+' - '+o.t+' - '+ST[o.s]+' - '+brl(tvo(o)),11,true);o.items.forEach(i=>ln('    '+i.q+'x '+i.n+'  ('+brl(i.p*i.q)+')',10));if(o.obs)ln('    Obs: '+o.obs,10);y+=2});
+   await d.save({filename:'comanda-'+st.iso+'.pdf',data:p.output('blob')});
+  }
+  toast('Arquivo salvo');
+ }catch(e){if(!e||e.code!=='declined')toast('Não foi possível salvar')}
+}
+async function nd(){if(armed!=='nd'){armed='nd';render();return}try{await run('clearToday')}catch(e){toast('Erro de conexão')}armed=null;await sync();toast('Pedidos de hoje apagados')}
+render();
+</script>
+<script type="module">
+import {initializeApp} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
+import {getFirestore,collection,doc,onSnapshot,query,where,runTransaction,setDoc,getDoc,getDocs,deleteDoc,writeBatch} from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
+import {firebaseConfig} from './firebase-config.js';
+if(firebaseConfig.apiKey==='COLE_AQUI'){
+ document.body.insertAdjacentHTML('afterbegin','<p style="padding:14px;margin:0;background:#fee;color:#900">Falta configurar o arquivo firebase-config.js</p>');
+}else{
+ const db=getFirestore(initializeApp(firebaseConfig));
+ const z=n=>String(n).padStart(2,'0');
+ const dayStr=()=>{const d=new Date();return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())};
+ const hora=()=>new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+ const limit=(p,ms=10000)=>Promise.race([p,new Promise((_,r)=>setTimeout(()=>r(new Error('timeout')),ms))]);
+ let menu=[],orders=[],day=dayStr(),unsub=null;
+ const push=()=>window.setState(menu,orders);
+ const DEFAULTS=[['Prato do dia',25],['Refrigerante',6],['Suco',7],['Sobremesa',8]];
+
+ onSnapshot(collection(db,'menu'),async s=>{
+  menu=s.docs.map(d=>d.data()).sort((a,b)=>a.id-b.id);push();
+  if(!s.empty||s.metadata.fromCache)return;
+  const m=doc(db,'meta','seed');
+  if((await getDoc(m)).exists())return;
+  const b=writeBatch(db);
+  DEFAULTS.forEach(([n,p],i)=>b.set(doc(db,'menu',String(i+1)),{id:i+1,n,p}));
+  b.set(m,{done:true});await b.commit();
+ },()=>toast('Erro ao ler o cardápio'));
+
+ function listen(){
+  if(unsub)unsub();day=dayStr();
+  unsub=onSnapshot(query(collection(db,'orders'),where('day','==',day)),s=>{
+   orders=s.docs.map(d=>d.data()).sort((a,b)=>a.id-b.id);push();
+  },()=>toast('Erro ao ler os pedidos'));
+ }
+ listen();
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&dayStr()!==day)listen()});
+
+ window.fb={
+  addOrder:o=>limit(runTransaction(db,async t=>{
+   const d=dayStr(),cr=doc(db,'counters',d),c=await t.get(cr),id=(c.exists()?c.data().n:0)+1;
+   t.set(cr,{n:id});
+   t.set(doc(db,'orders',d+'-'+id),{day:d,id,who:o.who,obs:o.obs,items:o.items,t:hora(),s:0});
+   return {id};
+  })),
+  setStatus:(id,from)=>limit(runTransaction(db,async t=>{
+   const r=doc(db,'orders',dayStr()+'-'+id),x=await t.get(r);
+   if(x.exists()&&x.data().s===from&&from<3)t.update(r,{s:from+1});
+  })),
+  deleteOrder:id=>limit(deleteDoc(doc(db,'orders',dayStr()+'-'+id))),
+  clearToday:async()=>{
+   const d=dayStr(),b=writeBatch(db);
+   (await getDocs(query(collection(db,'orders'),where('day','==',d)))).forEach(x=>b.delete(x.ref));
+   b.delete(doc(db,'counters',d));await b.commit();
+  },
+  addMenuItem:(n,p)=>{const id=Date.now();return limit(setDoc(doc(db,'menu',String(id)),{id,n,p}))},
+  removeMenuItem:id=>limit(deleteDoc(doc(db,'menu',String(id))))
+ };
+}
+</script>
+</body></html>
